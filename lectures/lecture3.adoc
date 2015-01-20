@@ -1,0 +1,110 @@
+= COMP120/COMP128 Review?
+
+== Warm up
+
+Write a small program that counts from 1 to 100. However, if the number is 
+divisible by 3, instead print "Fizz". If the number is divisible by 5, print
+"Buzz" instead. If the number is divisible by both 3 and 5, print "FizzBuzz".
+
+Why this program? If you were successful at coding it, great! 
+
+> http://blog.codinghorror.com/why-cant-programmers-program/[Your competition
+can't program it]
+
+If you couldn't code it quickly, don't worry (yet), this class is all about
+practising programming so you'll ace your interviews.
+
+== Command line
+
+In Git Bash (Start / Windows Key -> Git Bash), or Terminal (Spotlight -> Terminal)
+on Mac OS X, type the following:
+
+----
+cd              # Change directory (home directory by default)
+cd COMP201-2014 # Change into your COMP201-2014 directory
+pwd             # Print Working Directory
+start .         # Show folder contents in Explorer (Windows)
+open .          # Show folder contents in Finder (Mac)
+xdg-open .      # Show folder contents in GUI (Linux)
+----
+
+In the command line, `.` refers to the current directory and `..` refers to the
+parent directory.
+
+== Compiling code (Hello, world!)
+
+NOTE: If you haven't already installed g++,
+http://win-builds.org/download.html[please do so]. Otherwise, visit
+http://ideone.com[ideone.com] in the interim.
+
+Did you write fizzbuzz yet? No? Well, in the meantime, save this code into a
+file called `helloworld.cpp` in your `COMP201-2014` directory:
+
+----
+#include <iostream>
+
+using namespace std;
+
+int main(int argc, char* argv[]) {
+    cout << "Hello, world!" << endl;
+    return 0;
+}
+----
+
+In Git Bash or the Terminal, try the following:
+
+----
+g++ helloworld.cpp -o helloworld.exe
+./helloworld.exe
+----
+
+If everything worked OK, you should see `Hello, world!` in the command line window.
+In case you're wondering, the `./` in front of `helloworld.exe` indicates that
+we want to run `helloworld.exe` from the current folder.
+
+== Command line parameters in code
+
+Ever notice `(int argc, char *argv[])` as parameters to `main`? No?
+Well, they're a thing. As we all know, `main` is where the OS calls your
+program and begins, but the OS can pass stuff to your program from the command
+line. The first parameter, `argc` is how many strings the OS will pass to your
+program; the second parameter, `argv` is an array of strings, the parameters
+themselves.
+
+----
+#include <iostream>
+
+using namespace std;
+
+int main (int argc, char *argv[]) {
+    // Demo command-line parameters
+    for (int i = 0; i < argc; i++) {
+        cout << argv[i] << endl;
+    }
+}
+----
+
+If we save code above into a file called `parameters.cpp` and compile it, let's
+see what happens:
+
+----
+g++ parameters.cpp -o parameters.exe
+./parameters.exe
+----
+
+You'll see the full path to the program. This is the contents of `argv[0]`.
+If you pass parameters to the proram, the program will print them out, in turn.
+
+----
+./parameters.exe hello world
+----
+
+Nifty!
+
+== Strings
+
+`C++` has two kinds of strings: C-style strings (`char*`) and `C++`-style strings
+(`string`).
+
+Let's try them out to solve some small problem; reversing a string.
+

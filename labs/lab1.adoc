@@ -1,0 +1,88 @@
+= Lab 1
+
+This lab reviews concepts in COMP128 (loops, files, I/O). It should be reasonably
+easy? If it isn't, please don't hesitate to let me know. I want all of us to
+succeed.
+
+== Deadline
+January 20
+
+== Preface
+
+1. Copy the `1.5-rc3.zip` file on the USB stick to your Desktop.
+2. Extract the zip file to your Desktop (it will create a folder called `1.5-rc3`).
+3. Go into that folder, and keep diving in until you see a folder called `packages`. Keep going.
+Go into `windows_64`. Scroll down to `index.html`. Double click to open that up
+in your web browser.
+4. http://win-builds.org/download.html[Download and Run the Package Manager].
+5. Select the system to install for: *Native Windows*
+6. Select the architecture to install for: *x86_64*
+7. Chose where to install (Click browse, under your Desktop, create a new folder
+called `winbuilds`).
+8. Click OK.
+9. On the next page, it'll take it's sweet time to download package information.
+Since their server appears to be on dial-up, click *Change Mirror*
+10. Remember how we opened up a folder in the web browser? Wouldn't it be nice
+if we could copy/paste? Haha. That'd be too easy.
+So, carefully copy paste by typing the address in your browser (it'll end with:
+`1.5-rc3/packages/windows_64/` ) *Exclude* `index.html` from the mirror.
+11. Click OK. If things work, the dialog will go away.
+12. Click *Process* to install.
+13. Once it's done, you may need to add the installation path to your
+system path, because they hate us. Go to Start -> environment variables -> edit
+the system environment variables.
+13. Click *Environment variables...*
+14. Under *User variables* (not System variables), scroll down to *PATH* and
+double-click to edit it. *PATH* not there? Click `New...`
+15. *BE CAREFUL.* Add the folder where you installed windbuilds, but don't wipe
+it out. (It's semicolon-delimited) It's always okay to click cancel.
+16. Click OK until dialogs go away. Log out and log in again.
+17. Open Git Bash. Try g++ now.
+
+NOTE: If you get a *cc1plus.exe Entry Point Not Found* error when compiling, read
+the error message carefully. It is likely looking for a .dll file in the wrong
+place. Welcome to DLL hell. In Git Bash, type in `which` dll-file-goes-here`.dll`
+If it's not in your `winbuilds` folder, you will need to remove that other path from the system or
+user path.
+
+NOTE: if you get the following error from GCC when opening a file:
+`error: no matching function for call to 'std::basic_ifstream<char>::open(std::string &)'`
+Remember to provide a C string to the open function, using the `c_str` function
+in the string class.
+
+== Part 1
+
+Write a program that gets file name from the command line (`argv[1]`) and then
+creates a three-column table (each column separated by a tab (`\t`)), populated
+based upon the integers found in the file. For each integer in the file, the
+first column will be the integer, the second will be the integer squared, and
+the third column is to show a running sum of the integers in the file.
+
+For example, if the file had only the numbers `1, 2, 3, 0, -1`, then the
+resulting output to the screen would be:
+
+----
+x x^2 Current Sum
+= === ===========
+1  1   1
+2  4   3
+3  9   6
+0  0   6
+-1 1   5
+----
+
+== Part 2
+
+Modify Part 1 such that the output writes to a file called `output.txt`
+instead of displaying it to the screen.
+
+== How to submit
+
+Place your code in a file called `lab1.cpp`. Save this file in your `COMP201-2014`
+folder. Then do this:
+
+----
+git add lab1.cpp              # Add this file to version control
+git commit -m "Lab 1 is Done" # Record your change
+git push origin master        # Upload your stuff to github
+----

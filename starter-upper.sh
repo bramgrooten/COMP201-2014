@@ -216,6 +216,13 @@ ssh::connected() {
     fi
 }
 
+# Add host to known hosts
+ssh::add_host() {
+    local host="$1"
+    ssh-keyscan -t rsa "$1" 2>&1 | sort -u - ~/.ssh/known_hosts > ~/.ssh/tmp_hosts
+    cat ~/.ssh/tmp_hosts >> ~/.ssh/known_hosts
+}
+
 # User functions
 # ---------------------------------------------------------------------
 
@@ -408,6 +415,7 @@ git::showRepositories() {
 # 5. The private repo exists
 git::push() {
     cd ~/$REPO
+    ssh::add_host github.com
     git push -u origin master 2> /dev/null > /dev/null
     utility::lastSuccess
 }
