@@ -78,10 +78,13 @@ instead of displaying it to the screen.
 
 == How to submit
 
+You don't need to submit Parts 1 and 2 separately. Part 2 by itself should suffice.
+
 Place your code in a file called `lab1.cpp`. Save this file in your `COMP201-2014`
 folder. Then do this:
 
 ----
+cd ~/COMP201-2014             # Go into your repo
 git add lab1.cpp              # Add this file to version control
 git commit -m "Lab 1 is Done" # Record your change
 git push origin master        # Upload your stuff to github

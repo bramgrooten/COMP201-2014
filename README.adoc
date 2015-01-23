@@ -2,6 +2,11 @@
 
 http://en.cppreference.com/w/[C++ reference is your friend]
 
+== Week 3
+
+* https://github.com/lawrancej/COMP201-2014/blob/master/labs/lab2.adoc[Lab 2: Using strings and vectors]
+* MLK day!
+
 == Week 2
 
 * https://github.com/lawrancej/COMP201-2014/blob/master/labs/lab1.adoc[Lab 1: COMP120/128 Review?]
