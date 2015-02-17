@@ -307,6 +307,7 @@ void Controller::loop() {
         cin >> row;
         cout << "Enter column: ";
         cin >> col;
+        // a lot of endl's to "make sure" the user can't see his/her previous board and kinda cheat ;)
         cout << endl << endl << endl << endl << endl << endl << endl << endl
              << endl << endl << endl << endl << endl << endl << endl << endl
              << endl << endl << endl << endl << endl << endl << endl << endl
