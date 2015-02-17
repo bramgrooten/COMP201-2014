@@ -9,22 +9,14 @@ readonly REPO=COMP201-2014
 readonly SCHOOL=wit.edu
 # The instructor's Github username
 readonly INSTRUCTOR_GITHUB=lawrancej
+# The instructor's Gitlab username
+readonly INSTRUCTOR_GITLAB=lawrancej
 
 # Runtime flags (DO NOT CHANGE)
 # ---------------------------------------------------------------------
 readonly PROGNAME=$(basename $0)
 readonly ARGS="$@"
-
-PIPES=""
-
-finish() {
-    rm -f $PIPES 2> /dev/null
-}
-
-trap finish EXIT
-
-# Non-interactive Functions
-# ---------------------------------------------------------------------
+export TOP_PID=$$
 
 # Utilities
 # ---------------------------------------------------------------------
@@ -32,7 +24,7 @@ trap finish EXIT
 # Print out the size of the file
 utility::fileSize() {
     local file="$1"
-    local theSize="$(du -b "$file" | cut -f1)"
+    local theSize="$(wc -c "$file" | awk '{print $1}' )"
     if [[ -z "$theSize" ]]; then
         theSize="0"
     fi
@@ -60,16 +52,29 @@ utility::lastSuccess() {
     fi
 }
 
-utility::asTrueFalse() {
-    local result="$1"
-    if [[ "$result" ]]; then
-        printf "true"
-    else
-        printf "false"
-    fi
+PIPES=""
+
+pipe::rm() {
+    rm -f $PIPES 2> /dev/null
 }
 
-# Make a named pipe. It sniffs for mkfifo and mknod first. If we don't get a real pipe, just fake it with a regular file.
+app::shutdown() {
+    echo
+    printf "Cleaning up temporary files..." >&2
+    pushd ~ > /dev/null
+    pipe::rm
+    rm -f temp.html 2> /dev/null
+    popd > /dev/null
+    echo -e "                                           [\e[1;32mDONE\e[0m]" >&2
+    
+    kill -9 $TOP_PID  2> /dev/null > /dev/null
+}
+
+trap app::shutdown EXIT
+trap app::shutdown TERM
+
+# Make a named pipe. It sniffs for mkfifo and mknod first.
+# If we don't get a real pipe, just fake it with a regular file.
 pipe::new() {
     local pipe="$1"
     rm -f "$pipe" 2> /dev/null
@@ -103,7 +108,7 @@ pipe::write() {
     # If we got a real pipe, the pipe will wait, but if we got a fake pipe, ...
     if [[ ! -p "$pipe" ]]; then
         # We need to wait for the other side to read
-        while [[ "0" != "$(utility::fileSize "$pipe")" ]]; do
+        while [[ -s "$pipe" ]]; do
             sleep 1
         done
     fi
@@ -121,7 +126,7 @@ pipe::read() {
     # Windows users can't have nice things, as usual...
     elif [[ -f "$pipe" ]]; then
         # Wait for the other side to write
-        while [[ "0" == "$(utility::fileSize "$pipe")" ]]; do
+        while [[ ! -s "$pipe" ]]; do
             sleep 1
         done
         read -r line < "$pipe"
@@ -150,24 +155,22 @@ utility::MIMEType() {
 }
 
 # Cross-platform paste to clipboard
-# Return success if we pasted to the clipboard, fail otherwise
 utility::paste() {
     case $OSTYPE in
-        msys | cygwin ) echo "$1" > /dev/clipboard; utility::lastSuccess ;;
-        linux* | bsd* ) echo "$1" | xclip -selection clipboard; utility::lastSuccess ;;
-        darwin* ) echo "$1" | pbcopy; utility::lastSuccess ;;
-        *) utility::fail ;;
+        msys | cygwin ) echo "$1" > /dev/clipboard ;;
+        linux* | bsd* ) echo "$1" | xclip -selection clipboard ;;
+        darwin* ) echo "$1" | pbcopy ;;
+        *) return 1 ;;
     esac
 }
 
 # Cross-platform file open
-# Return success if we opened the file, fail otherwise
 utility::fileOpen() {
     case $OSTYPE in
-        msys | cygwin ) start "$1"; utility::lastSuccess ;;
-        linux* | bsd* ) xdg-open "$1"; utility::lastSuccess ;;
-        darwin* ) open "$1"; utility::lastSuccess ;;
-        *) utility::fail ;;
+        msys | cygwin ) start "$1" ;;
+        linux* | bsd* ) xdg-open "$1" ;;
+        darwin* ) open "$1" ;;
+        *) return 1 ;;
     esac
 }
 
@@ -191,13 +194,26 @@ utility::nonEmptyValueMatchesRegex() {
 # SSH
 # ---------------------------------------------------------------------
 
-# Get the user's public key
-ssh::getPublicKey() {
-    # If the public/private keypair doesn't exist, make it.
+# Configure our keypair and add known hosts keys
+ssh::configure() {
+    # Just in case they've never used SSH before...
+    mkdir -p ~/.ssh
+    touch ~/.ssh/known_hosts
+    
+    # If our public/private keypair doesn't exist, make it.
     if ! [[ -f ~/.ssh/id_rsa.pub ]]; then
         # Use default location, set no phassphrase, no questions asked
         printf "\n" | ssh-keygen -t rsa -N '' 2> /dev/null > /dev/null
     fi
+    
+    # Add known hosts (i.e., bitbucket.org, github.com, gitlab.com)
+    ssh-keyscan -t rsa bitbucket.org github.com gitlab.com ssh.github.com \
+    altssh.bitbucket.org 2>&1 | sort -u - ~/.ssh/known_hosts | uniq > ~/.ssh/tmp_hosts
+    cat ~/.ssh/tmp_hosts >> ~/.ssh/known_hosts
+}
+
+# Get the user's public key
+ssh::getPublicKey() {
     cat ~/.ssh/id_rsa.pub | sed s/==.*$/==/ # Ignore the trailing comment
 }
 
@@ -216,18 +232,11 @@ ssh::connected() {
     fi
 }
 
-# Add host to known hosts
-ssh::add_host() {
-    local host="$1"
-    ssh-keyscan -t rsa "$1" 2>&1 | sort -u - ~/.ssh/known_hosts > ~/.ssh/tmp_hosts
-    cat ~/.ssh/tmp_hosts >> ~/.ssh/known_hosts
-}
-
 # User functions
 # ---------------------------------------------------------------------
 
 # Get the user's username
-user::getUsername() {
+username::get() {
     local username="$USERNAME"
     if [[ -z "$username" ]]; then
         username="$(id -nu 2> /dev/null)"
@@ -239,31 +248,28 @@ user::getUsername() {
 }
 
 # A full name needs a first and last name
-valid::fullName() {
+full_name::valid() {
     local fullName="$1"
     utility::nonEmptyValueMatchesRegex "$fullName" "\w+ \w+"
 }
 
-# Set the full name, and return the name that was set
-user::setFullName() {
+# Set the full name
+full_name::set() {
     local fullName="$1"
-    if [[ $(valid::fullName "$fullName") ]]; then
-        if [[ "$fullName" != "The argument 'getfullname.ps1' to the -File parameter does not exist. Provide the path to an existing '.ps1' file as an argument to the -File parameter." ]]; then
-            git config --global user.name "$fullName"
-        fi
+    if [[ $(full_name::valid "$fullName") ]]; then
+        git config --global user.name "$fullName" > /dev/null
     fi
-    git config --global user.name
 }
 
 # Get the user's full name (Firstname Lastname); defaults to OS-supplied full name
 # Side effect: set ~/.gitconfig user.name if unset and full name from OS validates.
-user::getFullName() {
+full_name::get() {
     # First, look in the git configuration
     local fullName="$(git config --global user.name)"
     
     # Ask the OS for the user's full name, if it's not valid
-    if [[ ! $(valid::fullName "$fullName") ]]; then
-        local username="$(user::getUsername)"
+    if [[ ! $(full_name::valid "$fullName") ]]; then
+        local username="$(username::get)"
         case $OSTYPE in
             msys | cygwin )
                 cat << 'EOF' > getfullname.ps1
@@ -278,6 +284,9 @@ $windows::GetUserNameEx(3, $sb, [ref]$num) | out-null
 $sb.ToString()
 EOF
                 fullName=$(powershell -executionpolicy remotesigned -File getfullname.ps1 | sed -e 's/\(.*\), \(.*\)/\2 \1/')
+                if [[ "$fullName" == "The argument 'getfullname.ps1' to the -File parameter does not exist. Provide the path to an existing '.ps1' file as an argument to the -File parameter." ]]; then
+                    fullName=""
+                fi
                 rm getfullname.ps1 > /dev/null
                 ;;
             linux* )
@@ -290,91 +299,96 @@ EOF
         esac
         
         # If we got a legit full name from the OS, update the git configuration to reflect it.
-        user::setFullName "$fullName" > /dev/null
+        full_name::set "$fullName"
     fi
     printf "$fullName"
 }
 
 # We're assuming that students have a .edu email address
-valid::email() {
+email::valid() {
     local email="$(printf "$1" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
     utility::nonEmptyValueMatchesRegex "$email" "edu$"
 }
 
 # Get the user's email; defaults to username@school
 # Side effect: set ~/.gitconfig user.email if unset
-user::getEmail() {
+email::get() {
     # Try to see if the user already stored the email address
     local email="$(git config --global user.email | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
     # If the stored email is bogus, ...
-    if [[ ! $(valid::email "$email") ]]; then
+    if [[ ! $(email::valid "$email") ]]; then
         # Guess an email address and save it
-        email="$(user::getUsername)@$SCHOOL"
+        email="$(username::get)@$SCHOOL"
     fi
     # Resave, just in case of goofups
     git config --global user.email "$email"
     printf "$email"
 }
 
-# Set email for the user and return email stored in git
-user::setEmail() {
+# Set email for the user
+email::set() {
     local email="$1"
-    if [[ $(valid::email "$email") ]]; then
-        git config --global user.email "$email"
+    if [[ $(email::valid "$email") ]]; then
+        git config --global user.email "$email" > /dev/null
     fi
-    git config --global user.email
-}
-
-# Get the domain name out of the user's email address
-user::getEmailDomain() {
-    printf "$(user::getEmail)" | sed 's/.*[@]//'
-}
-
-# Is the school valid?
-valid::school() {
-    local school="$1"
-    utility::nonEmptyValueMatchesRegex "$school" "\w+"
-}
-
-# Get the user's school from their email address
-user::getSchool() {
-    local school="$(git config --global user.school)"
-    Acquire_software
-    if [[ ! "$(utility::nonEmptyValueMatchesRegex "$school" "\w+")" ]]; then
-        school="$(echo -e "$(user::getEmailDomain)\r\n" | nc whois.educause.edu 43 | sed -n -e '/Registrant:/,/   .*/p' | sed -n -e '2,2p' | sed 's/^[ ]*//')"
-    fi
-    printf "$school"
 }
 
 # Generic project host configuration functions
 # ---------------------------------------------------------------------
 
 # Get the project host username; defaults to machine username
-Host_getUsername() {
+host_login::get() {
     local host="$1"
     local username="$(git config --global $host.login)"
     if [[ -z "$username" ]]; then
-        username="$(user::getUsername)"
+        username="$(username::get)"
     fi
     printf "$username"
+}
+
+# Set host login
+host_login::set() {
+    local host="$1"; shift
+    local login="$1"
+    if [[ $(host_login::valid "$login") ]]; then
+        git config --global github.login "$login" > /dev/null
+    fi
+}
+
+# A valid host login
+host_login::valid() {
+    local username="$1"
+    # If the name is legit, ...
+    utility::nonEmptyValueMatchesRegex "$username" "^[0-9a-zA-Z][0-9a-zA-Z-]*$"
 }
 
 # Git
 # ---------------------------------------------------------------------
 
+cloned=false
+
 # Clone/fetch upstream
 git::clone_upstream() {
     local host="$1"; shift
     local upstream="$1"
-    # It'll go into the user's home directory
-    cd ~
-    if [ ! -d $REPO ]; then
-        git clone "https://$host/$upstream/$REPO.git" > /dev/null
-    else
-        cd $REPO
-        git fetch --all > /dev/null
+    pushd ~ > /dev/null
+    if [[ ! -d $REPO ]]; then
+        git clone "https://$host/$upstream/$REPO.git" 2> /dev/null > /dev/null
+        if [[ $? -eq 0 ]]; then
+            cloned=true
+        fi
     fi
-    utility::lastSuccess
+    
+    pushd $REPO > /dev/null
+    git submodule update --init --recursive > /dev/null
+    git fetch --all 2> /dev/null > /dev/null
+    if [[ $? -eq 0 ]]; then
+        cloned=true
+    fi
+    popd > /dev/null
+    
+    utility::fileOpen $REPO
+    popd > /dev/null
 }
 
 # Configure remotes
@@ -396,46 +410,17 @@ git::configure_remotes() {
     git remote | tr '\n' ' '
 }
 
-# Show the local and remote repositories
-git::showRepositories() {
-    local remote="$(git remote -v | grep origin | sed -e 's/.*git@\(.*\):\(.*\)\/\(.*\)\.git.*/https:\/\/\1\/\2\/\3/' | head -n 1)"
-    cd ~
-    # Open local repository in file browser
-    utility::fileOpen $REPO
-    # Open remote repository in web browser
-    utility::fileOpen "$remote"
-}
-
 # Push repository, and show the user local/remote repositories
 # Preconditions:
 # 1. SSH public/private keypair was generated
 # 2. The project host username was properly set
 # 3. SSH public key was shared with host
 # 4. SSH is working
-# 5. The private repo exists
+# 5. SSH key is in known_hosts
+# 6. The private repo exists
 git::push() {
     cd ~/$REPO
-    ssh::add_host github.com
-    git push -u origin master 2> /dev/null > /dev/null
-    utility::lastSuccess
-}
-
-
-readonly PIPE=.httpipe
-
-# http://mywiki.wooledge.org/NamedPipes
-# Also, simultaneous connections
-
-json::unpack() {
-    local json="$1"
-    echo "$json" | tr -d '"{}' | tr ',' '\n'
-}
-
-# Given a header key, return the value
-json::lookup() {
-    local json="$1"; shift
-    local key="$1"
-    echo -e "$json" | grep "$key" | sed -e "s/^$key:\(.*\)$/\1/"
+    git push -u origin master
 }
 
 # Is this a request line?
@@ -445,12 +430,6 @@ request::line() {
         utility::fail
     fi
     utility::success
-}
-
-# Get the method (e.g., GET, POST) of the request
-request::method() {
-    local request="$1"
-    echo "$request" | sed -e "s/\(^[^ ]*\).*/\1/" | head -n 1
 }
 
 # Get the target (URL) of the request
@@ -472,26 +451,13 @@ request::file() {
     fi
 }
 
-# Get the query portion of the request target URL, and return the results line by line
-request::query() {
-    request::target "$1" | sed -e 's/.*[?]\(.*\)$/\1/' | tr '&' '\n'
-}
-
 # Parse the request payload as form-urlencoded data
 request::post_form_data() {
     local request="$1"
     local payload="$(request::payload "$request")"
-    echo -e "REQUEST $request" >&2
     if [[ "$(request::lookup "$request" "Content-Type")" == "application/x-www-form-urlencoded" ]]; then
         echo "$payload" | tr '&' '\n'
     fi
-}
-
-# Given a query key, return the URL decoded value
-query::lookup() {
-    local query="$1"; shift
-    local key="$1"
-    echo -e "$(printf "$query" | grep "$key" | sed -e "s/^$key=\(.*\)/\1/" -e 'y/+/ /; s/%/\\x/g')"
 }
 
 # Return the key corresponding to the field
@@ -515,8 +481,8 @@ request::lookup() {
 
 # Return the payload of the request, if any (e.g., for POST requests)
 request::payload() {
-    local request="$1"; shift
-    echo -e "$request" | sed -n -e '/^$/,${p}'
+    local payload="$(echo "$1" | sed -e 's/^.*\\r\\n\\r\\n//')"
+    echo -e "$payload"
 }
 
 # Pipe HTTP request into a string
@@ -633,7 +599,7 @@ server::respond() {
     done
 }
 
-Acquire_netcat() {
+server::get_netcat() {
     local netcat=""
     # Look for netcat
     for program in "nc" "ncat" "netcat"; do
@@ -652,492 +618,69 @@ Acquire_netcat() {
     printf $netcat
 }
 
-server::works() {
-    local nc=$(Acquire_netcat)
-    "$nc" -l 8080 &
-    sleep 10
-    echo "works" > /dev/tcp/localhost/8080
-}
+readonly PIPE=.httpipe
 
 # Start the web server, using the supplied routing function
 server::start() {
     local routes="$1"
     pipe::new "$PIPE"
-    local nc=$(Acquire_netcat)
+    local nc=$(server::get_netcat)
     
     server::respond "$routes" | "$nc" -k -l 8080 | server::listen
 }
 
-
-# Github non-interactive functions
-# ---------------------------------------------------------------------
-
-# Set github login and print it back out
-github::set_login() {
-    local login="$1"
-    if [[ $(github::validUsername "$login") ]]; then
-        git config --global github.login "$login"
-    fi
-    git config --global github.login
-}
-
-# Helpers
-
-# Invoke a Github API method requiring authorization using curl
-github::invoke() {
-    local method=$1; shift
-    local url=$1; shift
-    local data=$1;
-    local header="Authorization: token $(git config --global github.token)"
-    curl -i --request "$method" -H "$header" -d "$data" "https://api.github.com$url" 2> /dev/null
-}
-
-# Queries
-
-# Is the name available on Github?
-github::nameAvailable() {
-    local username="$1"
-    local result="$(curl -i https://api.github.com/users/$username 2> /dev/null)"
-    if [[ -z $(echo $result | grep "HTTP/1.1 200 OK") ]]; then
-        utility::success
-    else
-        utility::fail
-    fi
-}
-
-# A valid Github username is not available, by definition
-github::validUsername() {
-    local username="$1"
-    # If the name is legit, ...
-    if [[ $(utility::nonEmptyValueMatchesRegex "$username" "^[0-9a-zA-Z][0-9a-zA-Z-]*$") ]]; then
-        # And unavailable, ...
-        if [[ ! $(github::nameAvailable $username) ]]; then
-            # It's valid
-            utility::success
-        else
-            utility::fail
-        fi
-    else
-        # Otherwise, it's not valid
-        utility::fail
-    fi
-}
-
-# Are we logged into Github?
-github::loggedIn() {
-    if [[ -n "$(git config --global github.token)" ]]; then
-        utility::success
-    else
-        utility::fail
-    fi    
-}
-
-# Did the user add their email to the Github account?
-github::emailAdded() {
-    local email="$1"
-    local emails="$(github::invoke GET "/user/emails" "" | tr '\n}[]{' ' \n   ')"
-    if [[ -z $(echo "$emails" | grep "$email") ]]; then
-        utility::fail
-    else
-        utility::success
-    fi
-}
-
-# Did the user verify their email with Github?
-github::emailVerified() {
-    local email="$1"
-    local emails="$(github::invoke GET "/user/emails" "" | tr '\n}[]{' ' \n   ')"
-    if [[ -z $(echo "$emails" | grep "$email" | grep "verified...true") ]]; then
-        utility::fail
-    else
-        utility::success
-    fi
-}
-
-# What plan does the user have?
-github::plan() {
-    github::invoke GET /user '' \
-        | sed -n -e '/[\"]plan[\"]/,${p}' \
-        | grep -E "[\"]name[\"]" \
-        | sed -e 's/ *[\"]name[\"]: [\"]\(.*\)[\"].*/\1/' \
-        | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz'
-}
-
-# Is the user's plan upgraded?
-github::upgradedPlan() {
-    local plan="$(github::plan)"
-    # If we got nothing back, we're not authenticated
-    if [[ -z "$plan" ]]; then
-        utility::fail
-    # If we got something back, and it's not the free plan, we're good
-    elif [[ "$plan" != "free" ]]; then
-        utility::success
-    # The free plan won't cut it
-    else
-        utility::fail
-    fi
-}
-
-# start -> logged_in -> added email -> verified email -> upgraded account
-github::accountStatus() {
-    local email="$(user::getEmail)"
-    if [[ ! $(github::loggedIn) ]]; then
-        printf "start"
-    elif [[ ! $(github::emailAdded "$email") ]]; then
-        printf "logged_in"
-    elif [[ ! $(github::emailVerified "$email") ]]; then
-        printf "added_email"
-    elif [[ ! $(github::upgradedPlan) ]]; then
-        printf "verified_email"
-    else
-        printf "upgraded"
-    fi
-}
-
-# Commands
-
-# Log out of Github
-github::logout() {
-    git config --global --unset github.login
-    git config --global --unset github.token
-}
-
-# Add email to Github account, if not already added
-# Even though this adds email programmatically, Github will not send a verification email.
-github::addEmail() {
-    local email="$1"
-    if [[ ! $(github::emailAdded "$email") ]]; then
-        github::invoke POST "/user/emails" "[\"$email\"]" > /dev/null
-    fi
-}
-
-# Github CLI-interactive functions
-# ---------------------------------------------------------------------
-
-github::hasAccount() {
-    local hasAccount="n"
-    # If we don't have their github login, ...
-    if [[ -z "$(git config --global github.login)" ]]; then
-        # Ask if they're on github yet
-        read -p "Do you have a Github account (yes or No [default])? " hasAccount < /dev/tty
-        # Let's assume that they don't by default
-        if [[ $hasAccount != [Yy]* ]]; then
-            utility::fail
-        else
-            utility::success
-        fi
-    else
-        utility::success
-    fi
-}
-
-# Ask the user if they have an account yet, and guide them through onboarding
-github::join() {
-    local hasAccount="n"
-    
-    # If we don't have their github login, ...
-    if [[ -z "$(git config --global github.login)" ]]; then
-        # Ask if they're on github yet
-        read -p "Do you have a Github account (yes or No [default])? " hasAccount < /dev/tty
-
-        echo -e "\e[1;37;41mIMPORTANT\e[0m: Before we proceed, you need to complete ALL of these steps:"
-
-        # Let's assume that they don't by default
-        if [[ $hasAccount != [Yy]* ]]; then
-            echo "1. Join Github, using $(user::getEmail) as your email address."
-            echo "2. Open your email inbox and verify your school email address."
-            echo "3. Request an individual student educational discount."
-            echo ""
-            
-            echo "Press enter to join Github."
-            Interactive_fileOpen "https://github.com/join"
-        else
-            echo "1. Share and verify your school email address with Github."
-            echo "2. Request an individual student educational discount."
-            echo ""
-        fi
-        
-        github::verifyEmail
-        github::getDiscount
-
-    fi
-}
-
-# Set the Github username, if not already set
-github::setUsername() {
-    github::join
-    if [[ -z "$(git config --global github.token)" ]]; then
-        Interactive_setValue "github.login" "$(Host_getUsername "github")" "github::validUsername" "Github username" "\nNOTE: Usernames are case-sensitive. See: https://github.com"
-    fi
-}
-
-# Attempt to login to Github
-github::authorize() {
-    local password="$1"; shift
-    local code="$1"
-    read -r -d '' json <<-EOF
-            {
-                "scopes": ["repo", "public_repo", "user", "write:public_key", "user:email"],
-                "note": "starterupper $(date --iso-8601=seconds)"
-            }
-EOF
-    curl -i -u $(user::getEmail):$password -H "X-GitHub-OTP: $code" -d "$json" https://api.github.com/authorizations 2> /dev/null
-}
-
-# Idea: refactor to use interactive_setValue instead.
-# Acquire authentication token and store in github.token
-github::authenticate() {
-    # Don't bother if we already got the authentication token
-    if [[ -n "$(git config --global github.token)" ]]; then
-        return 0
-    fi
-    local token="HTTP/1.1 401 Unauthorized"
-    local code=''
-    local password=''
-    # As long as we're unauthorized, ...
-    while [[ ! -z "$(echo $token | grep "HTTP/1.1 401 Unauthorized" )" ]]; do
-        # Ask for a password
-        if [[ -z "$password" ]]; then
-            read -s -p "Enter Github password (not shown or saved): " password < /dev/tty
-            echo # We need this, otherwise it'll look bad
-        fi
-        # Generate authentication token request
-        token=$(github::authorize "$password" "$code")
-        # If we got a bad credential, we need to reset the password and try again
-        if [[ ! -z $(echo $token | grep "Bad credential") ]]; then
-            echo -e "\e[1;37;41mERROR\e[0m: Incorrect password for user $(Host_getUsername "github"). Please wait."
-            password=''
-            sleep 1
-        fi
-        # If the user has two-factor authentication, ask for it.
-        if [[ ! -z $(echo $token | grep "two-factor" ) ]]; then
-            read -p "Enter Github two-factor authentication code: " code < /dev/tty
-        fi
-    done
-    # By now, we're authenticated, ...
-    if [[ ! -z $(echo $token | grep "HTTP/... 20." ) ]]; then
-        # So, extract the token and store it in github.token
-        token=$(echo $token | tr '"' '\n' | grep -E '[0-9a-f]{40}')
-        git config --global github.token "$token"
-        echo "Authenticated!"
-    # Or something really bad happened, in which case, github.token will remain unset...
-    else
-        # When bad things happen, degrade gracefully.
-        echo -n -e "\e[1;37;41mERROR\e[0m: "
-        echo "$token" | grep "HTTP/..."
-        echo
-        echo "I encountered a problem and need your help to finish these setup steps:"
-        echo
-        echo "1. Update your Github profile to include your full name."
-        echo "2. Create private repository $REPO on Github."
-        echo "3. Add $INSTRUCTOR_GITHUB as a collaborator."
-        echo "4. Share your public SSH key with Github."
-        echo "5. Push to your private repository."
-        echo
-    fi
-}
-
-# Share full name with Github
-github::setFullName() {
-    local fullName="$(user::getFullName)"
-    # If authentication failed, degrade gracefully
-    if [[ -z $(git config --global github.token) ]]; then
-        echo "Press enter to open https://github.com/settings/profile to update your Github profile."
-        echo "On that page, enter your full name. $(Interactive_paste "$fullName" "your full name")"
-        echo "Then, click Update profile."
-        Interactive_fileOpen "https://github.com/settings/profile"
-    # Otherwise, use the API
-    else
-        echo "Updating Github profile information..."
-        github::invoke PATCH "/user" "{\"name\": \"$fullName\"}" > /dev/null
-    fi
-}
-
-# Share the public key
-github::sharePublicKey() {
-    local githubLogin="$(Host_getUsername "github")"
-    # If authentication failed, degrade gracefully
-    if [[ -z "$(git config --global github.token)" ]]; then
-        echo "Press enter to open https://github.com/settings/ssh to share your public SSH key with Github."
-        echo "On that page, click Add SSH Key, then enter these details:"
-        echo "Title: $(hostname)"
-        echo "Key: $(Interactive_paste "$(ssh::getPublicKey)" "your public SSH key")"
-        Interactive_fileOpen "https://github.com/settings/ssh"
-    # Otherwise, use the API
-    else
-        # Check if public key is shared
-        local publickeyShared=$(curl -i https://api.github.com/users/$githubLogin/keys 2> /dev/null)
-        # If not shared, share it
-        if [[ -z $(echo "$publickeyShared" | grep $(ssh::getPublicKey | sed -e 's/ssh-rsa \(.*\)=.*/\1/')) ]]; then
-            echo "Sharing public key..."
-            github::invoke POST "/user/keys" "{\"title\": \"$(hostname)\", \"key\": \"$(ssh::getPublicKey)\"}" > /dev/null
-        fi
-    fi
+# Determine if SSH connection works
+github::connected() {
     # Test SSH connection on default port (22)
     if [[ ! $(ssh::connected "github.com") ]]; then
-        echo "Your network has blocked port 22; trying port 443..."
         printf "Host github.com\n  Hostname ssh.github.com\n  Port 443\n" >> ~/.ssh/config
         # Test SSH connection on port 443
         if [[ ! $(ssh::connected "github.com") ]]; then
-            echo "WARNING: Your network has blocked SSH."
-            ssh_works=false
+            return 1
         fi
     fi
+    return 0
 }
-
-# Create a private repository on Github
-github::createPrivateRepo() {
-    # If authentication failed, degrade gracefully
-    if [[ -z "$(git config --global github.token)" ]]; then
-        github::manualCreatePrivateRepo
-        return 0
-    fi
-    
-    local githubLogin="$(Host_getUsername "github")"
-    # Don't create a private repo if it already exists
-    if [[ -z $(github::invoke GET "/repos/$githubLogin/$REPO" "" | grep "Not Found") ]]; then
-        return 0
-    fi
-    
-    echo "Creating private repository $githubLogin/$REPO on Github..."
-    local result="$(github::invoke POST "/user/repos" "{\"name\": \"$REPO\", \"private\": true}")"
-    if [[ ! -z $(echo $result | grep "HTTP/... 4.." ) ]]; then
-        echo -n -e "\e[1;37;41mERROR\e[0m: "
-        echo "Unable to create private repository."
-        echo
-        echo "Troubleshooting:"
-        echo "* Make sure you have verified your school email address."
-        echo "* Apply for the individual student educational discount if you haven't already done so."
-        echo "* If you were already a Github user, free up some private repositories."
-        echo
-        
-        github::verifyEmail
-        github::getDiscount
-        github::manualCreatePrivateRepo
-    fi
-}
-
-# Add a collaborator
-github::addCollaborator() {
-    local githubLogin="$(Host_getUsername "github")"
-    # If authentication failed, degrade gracefully
-    if [[ -z "$(git config --global github.token)" ]]; then
-        echo "Press enter to open https://github.com/$githubLogin/$REPO/settings/collaboration to add $1 as a collaborator."
-        echo "$(Interactive_paste "$1" "$1")"
-        echo "Click Add collaborator."
-        Interactive_fileOpen "https://github.com/$githubLogin/$REPO/settings/collaboration"
-    # Otherwise, use the API
-    else
-        echo "Adding $1 as a collaborator..."
-        github::invoke PUT "/repos/$githubLogin/$REPO/collaborators/$1" "" > /dev/null
-    fi
-}
-
-# Clean up everything but the repo (BEWARE!)
-github::clean() {
-    echo "Delete starterupper-script under Personal access tokens"
-    Interactive_fileOpen "https://github.com/settings/applications"
-    sed -i s/.*github.com.*// ~/.ssh/known_hosts
-    git config --global --unset user.name
-    git config --global --unset user.email
-    git config --global --unset github.login
-    git config --global --unset github.token
-    rm -f ~/.ssh/id_rsa*
-}
-
-# Add collaborators
-github::addCollaborators() {
-    cd ~/$REPO
-    for repository in $(github::invoke GET "/user/repos?type=member\&sort=created\&page=1\&per_page=100" "" | grep "full_name.*$REPO" | sed s/.*full_name....// | sed s/..$//); do
-        git remote add ${repository%/*} git@github.com:$repository.git 2> /dev/null
-    done
-    git fetch --all
-}
-
-# Deprecate these
-
-# Create a private repository manually
-github::manualCreatePrivateRepo() {
-    echo "Press enter to open https://github.com/new to create private repository $REPO on Github."
-    echo "On that page, for Repository name, enter: $REPO. $(Interactive_paste "$REPO" "the repository name")"
-    echo "Then, select Private and click Create Repository (DON'T tinker with other settings)."
-    Interactive_fileOpen "https://github.com/new"
-}
-
-# Ask user to verify email
-github::verifyEmail() {
-    echo "Press enter to open https://github.com/settings/emails to add your school email address."
-    echo "Open your email inbox and wait a minute for an email from Github."
-    echo "Follow its instructions: click the link in the email and click Confirm."
-    echo "$(Interactive_paste $(user::getEmail) "your school email")"
-    Interactive_fileOpen "https://github.com/settings/emails"
-}
-
-# Ask the user to get the discount
-github::getDiscount() {
-    echo "Press enter to open https://education.github.com/discount_requests/new to request an individual student educational discount from Github."
-    Interactive_fileOpen "https://education.github.com/discount_requests/new"
-}
-
-# github::plan
-
-# Hmm, deep screen sandboxing mode will run a command twice. This is bad.
-# Possible workaround: submit bogus password?
-# github::authenticate
-# github::addEmail "q2w3e4r5@mailinator.com"
-# echo $(github::emailAdded "lawrancej@wit.edu")
-# echo $(github::emailVerified "lawrancej@wit.edu")
 
 # Make the index page
 app::make_index() {
-    local githubLoggedIn=$(utility::asTrueFalse $(github::loggedIn))
-    local githubEmailVerified=$(utility::asTrueFalse $(github::emailVerified "$email"))
-    local githubUpgradedPlan=$(utility::asTrueFalse $(github::upgradedPlan))
-    local githubEmailAdded=$(utility::asTrueFalse $(github::emailAdded "$email"))
-    
+
     curl http://lawrancej.github.io/starterupper/index.html 2> /dev/null > $REPO-index.html 
+#    cp ~/projects/starterupper/index.html $REPO-index.html
 
     sed -e "s/REPOSITORY/$REPO/g" \
-    -e "s/USER_EMAIL/$(user::getEmail)/g" \
-    -e "s/FULL_NAME/$(user::getFullName)/g" \
-    -e "s/GITHUB_LOGIN/$(Host_getUsername github)/g" \
+    -e "s/USER_EMAIL/$(email::get)/g" \
+    -e "s/FULL_NAME/$(full_name::get)/g" \
+    -e "s/USER_NAME/$(username::get)/g" \
     -e "s/INSTRUCTOR_GITHUB/$INSTRUCTOR_GITHUB/g" \
     -e "s/PUBLIC_KEY/$(ssh::getPublicKeyForSed)/g" \
     -e "s/HOSTNAME/$(hostname)/g" \
-    -e "s/GITHUB_LOGGED_IN/$githubLoggedIn/g" \
-    -e "s/GITHUB_UPGRADED_PLAN/$githubUpgradedPlan/g" \
-    -e "s/GITHUB_EMAIL_ADDED/$githubEmailAdded/g" \
-    -e "s/GITHUB_EMAIL_VERIFIED/$githubEmailVerified/g" \
     $REPO-index.html > temp.html
+    rm "$REPO-index.html"
 }
 
-app::index() {
-    local request="$1"
-    
-    echo "$(request::payload "$request")" >&2
-#    printf "$(request::query "$request")" >&2
-    local email
-    
-    request::post_form_data "$request" | while read parameter; do
+# Given a POST request, receive the data
+app::receive_data() {
+    request::post_form_data "$1" | while read parameter; do
         local key="$(parameter::key "$parameter")"
         local value="$(parameter::value "$parameter")"
         case "$key" in
-            "user.name" )
-                user::setFullName "$value"
-                ;;
-            "user.email" )
-                email="$value"
-                user::setEmail "$value"
-                github::addEmail "$value"
-                ;;
-#            "github.login" )
-#                Github
+            "user.name" )    full_name::set "$value" ;;
+            "user.email" )   email::set "$value" ;;
+            "github.login" ) host_login::set "github" "$value" ;;
         esac
     done
+}
+
+app::index() {
+    app::receive_data "$1"
+    
+    git::configure_remotes "github.com" "$(host_login::get "github")" "$INSTRUCTOR_GITHUB" > /dev/null
+    github::connected
+    git::push >&2
     
     app::make_index
     server::send_file "temp.html"
-    rm temp.html
 }
 
 # Return the browser to the browser for disabled JavaScript troubleshooting
@@ -1156,51 +699,33 @@ app::browser() {
 
 # Setup local repositories
 app::setup() {
-    local request="$1"
+    printf "Receiving data..." >&2
+    app::receive_data "$1"
+    echo -e "                                                          [\e[1;32mOK\e[0m]" >&2
+
+    git::configure_remotes "github.com" "$(host_login::get github)" "$INSTRUCTOR_GITHUB" > /dev/null
+
     local response=""
-    case "$(request::method "$request")" in
-        # Respond to preflight request
-        "OPTIONS" )
-            response="$(response::new "204 No Content")"
-            response="$(response::add_header "$response" "Access-Control-Allow-Origin: *")"
-            response="$(response::add_header "$response" "Access-Control-Allow-Methods: GET, POST")"
-            response="$(response::add_header "$response" "Access-Control-Allow-Headers: $(request::lookup "$request" "Access-Control-Request-Headers")")"
-            response::send "$response"
-            echo "SENT RESPONSE" >&2
-            ;;
-        # Get that glorious data from the user and do what we set out to accomplish
-        "POST" )
-            local data="$(json::unpack "$(request::payload "$request")")"
-            local github_login="$(json::lookup "$data" "github.login")"
-            local user_name="$(json::lookup "$data" "user.name")"
-            local user_email="$(json::lookup "$data" "user.email")"
-            # Git configuration
-            
-            read -r -d '' response <<-EOF
+    printf "Responding to request..." >&2
+    read -r -d '' response <<-EOF
 {
-    "name": "$(user::setFullName "$user_name")",
-    "email": "$(user::setEmail "$user_email")",
-    "github": "$(github::set_login "$github_login")",
-    "clone": $(utility::asTrueFalse $(git::clone_upstream "github.com" "$INSTRUCTOR_GITHUB")),
-    "remotes": "$(git::configure_remotes "github.com" "$(git config --global github.login)" "$INSTRUCTOR_GITHUB")",
-    "push": $(utility::asTrueFalse $(git::push))
+  "name": "$(full_name::get)",
+  "email": "$(email::get)",
+  "github": "$(host_login::get "github")",
+  "clone": ${cloned},
+  "status": true
 }
 EOF
-            # The response needs to set variables: name, email, git-clone, git-push
-            server::send_string "$response" "response.json"
-            ;;
-        # If we get here, something terribly wrong has happened...
-        * )
-            echo "the request was '$request'" >&2
-            echo "$(request::method "$request")" >&2
-            ;;
-    esac
-}
+    server::send_string "$response" "response.json"
+    echo -e "                                                   [\e[1;32mOK\e[0m]" >&2
+    
+    sleep 1
 
-# Dummy response to verify server works
-app::test() {
-    local request="$1"
-    server::send_string "true" "application/json"
+    github::connected
+    git::push >&2
+    if [[ $? -eq 0 ]]; then
+        app::shutdown
+    fi
 }
 
 # Handle requests from the browser
@@ -1209,24 +734,46 @@ app::router() {
     local target="$(request::file "$request")"
     case "$target" in
         "/" )           app::index "$request" ;;
-        "test" )        app::test "$request" ;;
         "browser.css" ) app::browser "$request" ;;
         "setup" )       app::setup "$request" ;;
         * )             server::send_file "$target"
     esac
 }
 
-printf "Please wait, gathering information..." >&2
-cd ~
-app::make_index
-utility::fileOpen temp.html > /dev/null
-echo -e "                                      [\e[1;32mOK\e[0m]" >&2
-echo -e "Starting local web server at http://localhost:8080...                      [\e[1;32mOK\e[0m]" >&2
-server::start "app::router"
+app::url() {
+    printf "file://$(pwd | sed -e "s/^\\/c/\\/c:/")/temp.html"
+}
 
-# if [[ "$(utility::fileOpen http://localhost:8080)" ]]; then
-    # echo -e "Opened web browser to http://localhost:8080                                [\e[1;32mOK\e[0m]" >&2
-# else
-    # echo -e "Please open web browser to http://localhost:8080              [\e[1;32mACTION REQUIRED\e[0m]" >&2
-# fi
+main() {
+    # Go into the home directory
+    pushd ~ > /dev/null
+    
+    # Make web page
+    printf "Please wait, gathering information..."
+    ssh::configure
+    app::make_index
+    echo -e "                                      [\e[1;32mOK\e[0m]"
+    
+    # Clone upstream
+    printf "Cloning upstream..."
+    git::clone_upstream "github.com" "$INSTRUCTOR_GITHUB"
+    if [[ $cloned == true ]]; then
+        echo -e "                                                        [\e[1;32mOK\e[0m]"
+    else
+        echo -e "                                                    [\e[1;31mFAILED\e[0m]"
+    fi
 
+    # Open setup page
+    utility::paste "$(app::url)"
+    echo "Opening $(app::url) in a web browser."
+    utility::fileOpen temp.html
+
+    echo -e "Starting local web server at http://localhost:8080...                      [\e[1;32mOK\e[0m]"
+    server::start "app::router"
+    
+    # Go back where we were
+    popd > /dev/null
+}
+
+export TERM=xterm
+main

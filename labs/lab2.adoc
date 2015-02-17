@@ -69,14 +69,14 @@ using namespace std;
 
 int main() {
     // Convert string to an integer;
-    string pi = "314159";
+    string year = "2001: A space odyssey";
     char *end;
     int pie;
     
     // strtol converts a string to an integer
-    pie = strtol(pi.c_str(), &end, 10);
+    year = strtol(year.c_str(), &end, 10);
     
-    cout << pie << endl;
+    cout << year << endl;
     
     return 0;
 }
