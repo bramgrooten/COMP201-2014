@@ -2,6 +2,14 @@
 
 http://en.cppreference.com/w/[C++ reference is your friend]
 
+== Week 5
+
+* https://github.com/lawrancej/COMP201-2014/blob/master/lectures/finite-state-machines.adoc[Lecture: Finite State Machines]
+
+== Week 4
+
+Yeah
+
 == Week 3
 
 * https://github.com/lawrancej/COMP201-2014/blob/master/labs/lab2.adoc[Lab 2: Using strings and vectors]

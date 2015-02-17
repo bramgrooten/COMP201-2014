@@ -1,0 +1,76 @@
+= Finite state machines
+
+== Definitions
+
+Finite state machines describe systems consisting of a finite number of well-defined states (i.e., phases or configurations) and transitions among these states.
+They have a single start state, and zero or many final (or accepting) states.
+External input such as data, an event, or the passage of time triggers transitions among states.
+Transitions among states usually imply external actions.
+Finite state machines (specifically, deterministic finite state machines) can
+only be in one state at a time (Non-deterministic finite state machines can be
+in several states simultaneously; but since http://en.wikipedia.org/wiki/Powerset_construction[they're equivalent to deterministic finite state machines],
+we ignore them in this discussion).
+
+== Examples
+
+Finite state machines are everywhere if you know where to look.
+Trivial examples include light switches and the http://en.wikipedia.org/wiki/Phase_transition[states of matter].
+A light switch is either on or off; flipping the switch transitions among those two states.
+States of matter include: solid, liquid, gas, and plasma; transitions have fancy names like boiling, freezing, melting, deposition, sublimation, vaporization and condensation.
+In computing, finite state machines describe how CPUs, compilers, regular expressions, and operating systems work.
+Thinking about yourself for a moment: what are the states and transitions in your day or your life?
+Care to draw a diagram?
+
+== Diagrams
+
+Typically, we draw finite state machines using state-transition diagrams.
+In diagrams, states are labelled nodes (circles), and transitions are edges (arrows) labelled by the triggering input and actions.
+An unlabeled arrow from nowhere to a state designates the start state.
+Nodes depicted with two concentric circles are final (or accepting) states.
+
+== Converting to code
+
+To convert a finite state machine into code, first draw the state-transition diagram,
+then ask for each state and transition, "what state do we visit next?"
+
+Use an enumeration to define the possible states.
+
+----
+enum State { START, BY, LISTING, STATES, HERE, AND, THERE };
+----
+
+Use a variable to represent the state using the enumeration you defined.
+
+----
+State currentState;
+----
+
+Initialize the state to the start state;
+
+----
+currentState = START;
+----
+
+Transitions can occur for any number of reasons, but the template for transitioning
+is a switch statement on the state variable (where the cases are the possible states):
+
+----
+switch(currentState) {
+case START:
+    // perform actions as necessary
+    // and decide where to go next
+    // if there's only one state to transition to next
+    // just set the variable to the state
+    currentState = HERE;
+    break;
+case HERE:
+    // otherwise, use an if statement to
+    // determine which state to transition to next
+    if (restart) {
+        currentState = START;
+    } else {
+        currentState = THERE;
+    }
+    break;
+}
+----
