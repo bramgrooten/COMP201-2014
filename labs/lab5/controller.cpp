@@ -54,6 +54,7 @@ void Controller::loop() {
             }
         }
     }
+    // TODO: show something nice?
     view->show(model);
     SDL_Delay(3000);
 }
