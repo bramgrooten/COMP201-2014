@@ -5,10 +5,14 @@
 using namespace std;
 
 // Constructor initializes the object
-Model::Model(int w, int h) {
-    width = w;
+Model::Model(int h, int w) {
     height = h;
-    state = INIT;
+    width = w;
+    currentState = NO_MATCH;
+    lastRow.push_back(0);
+    lastRow.push_back(0);
+    lastColumn.push_back(0);
+    lastColumn.push_back(0);
     grid = new char*[height];
     visible = new char*[height];
     // For every row, create the array for that row
@@ -57,20 +61,67 @@ Model::~Model() {
     delete grid;
     delete visible;
 }
-// TODO: Is the row/column valid?
+// Is the row/column valid?
 // That is, is the row within the height, and is the column within the width?
 // Return whether it is or isn't.
+// TO DO: click on already guessed spot should not be valid (to avoid cheating)
 bool Model::valid(int row, int column) {
-    return true;
+    if (visible[row][column]!='_') {
+        return false;
+    }
+    if (row<height && column<width && row>=0 && column >= 0) {
+        return true;
+    }
+    return false;
 }
 bool Model::matched(int row, int column) {
     return true;
 }
-// TODO: Flip a cell
+// Flip a cell
 void Model::flip(int row, int column) {
     // If the row and column are not valid, break out and don't do anything
     if (!valid(row, column)) { return; }
-    visible[row][column] = grid[row][column];
+    // We are selecting the next "cell" to flip
+    // If the last cell and the current cell match, great!
+    // Otherwise, make the last cell invisible (set it to *)
+    // Make the current cell visible
+    switch (currentState) {
+        case NO_MATCH:
+            visible[lastRow[0]][lastColumn[0]] = '_';
+            visible[lastRow[1]][lastColumn[1]] = '_';
+            visible[row][column] = grid[row][column];
+            lastRow[0]=lastRow[1];
+            lastColumn[0]=lastColumn[1];
+            lastRow[1]=row;
+            lastColumn[1]=column;
+            currentState = FIRST;
+            break;
+        case FIRST:
+            if (grid[row][column]==grid[lastRow[1]][lastColumn[1]]) {
+                currentState = MATCH;
+                visible[row][column] = grid[row][column];
+                lastRow[0] = lastRow[1];
+                lastColumn[0] = lastColumn[1];
+                lastRow[1] = row;
+                lastColumn[1] = column;
+            } else {
+                currentState = NO_MATCH;
+                visible[row][column] = grid[row][column];
+                lastRow[0] = lastRow[1];
+                lastColumn[0] = lastColumn[1];
+                lastRow[1] = row;
+                lastColumn[1] = column;
+            }
+            break;
+        case MATCH:
+            visible[row][column] = grid[row][column];
+            lastRow[0] = lastRow[1];
+            lastColumn[0] = lastColumn[1];
+            lastRow[1] = row;
+            lastColumn[1] = column;
+            currentState = FIRST;
+            break;
+    }
 }
 // If everything is visible, then it's game over
 bool Model::gameOver() {
@@ -92,12 +143,12 @@ bool Model::gameOver() {
                 visible[i][j] = '_';
             }
         }
-        visible[2][3] = 'Y';
-        visible[2][4] = 'O';
-        visible[2][5] = 'U';
-        visible[4][3] = 'W';
-        visible[4][4] = 'I';
-        visible[4][5] = 'N';
+        visible[1][2] = 'Y';
+        visible[1][3] = 'O';
+        visible[1][4] = 'U';
+        visible[2][2] = 'W';
+        visible[2][3] = 'I';
+        visible[2][4] = 'N';
     }
     return isOver;
 }
